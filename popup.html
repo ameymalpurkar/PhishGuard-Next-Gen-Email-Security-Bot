@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Phishing Detector</title>
+  <style>
+    body { width: 300px; padding: 10px; font-family: Arial, sans-serif; }
+    button { width: 100%; padding: 10px; margin-top: 10px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    button:hover { background-color: #45a049; }
+    #status { margin-top: 10px; font-size: 0.9em; color: #555; }
+    #result { margin-top: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;}
+  </style>
+</head>
+<body>
+  <h3>Gmail Phishing Detector</h3>
+  <p>Open an email in Gmail and click "Analyze Email" to check for phishing indicators.</p>
+  <button id="analyzeButton">Analyze Current Email</button>
+  <div id="status"></div>
+  <div id="result"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

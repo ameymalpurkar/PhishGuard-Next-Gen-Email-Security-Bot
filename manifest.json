@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Gmail Phishing Detector",
+  "version": "1.0",
+  "description": "Scans Gmail content for potential phishing indicators using a Python backend.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+    
+  ],
+  "host_permissions": [
+    "https://mail.google.com/*",
+    "http://localhost:8000/*" 
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+"content_scripts": [
+  {
+    "matches": ["https://mail.google.com/*"],
+    "js": ["content.js"]
+  }
+],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
