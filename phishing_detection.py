@@ -8,8 +8,9 @@ in text content. It exposes three endpoints for phishing analysis.
 
 import sys
 import re
+import os
 from urllib.parse import urlparse
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Check if we can import the necessary libraries
 try:
@@ -17,11 +18,58 @@ try:
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
     import uvicorn
+    import google.generativeai as genai
+    from google.generativeai.types import HarmCategory, HarmBlockThreshold
     print("✅ FastAPI and dependencies imported successfully", file=sys.stderr)
 except ImportError as e:
     print(f"❌ Failed to import necessary libraries: {e}", file=sys.stderr)
-    print("Hint: Install required packages with: pip install fastapi uvicorn", file=sys.stderr)
+    print("Hint: Install required packages with: pip install fastapi uvicorn google-generativeai", file=sys.stderr)
     sys.exit(1)
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    print("⚠️ python-dotenv not installed. Using environment variables directly.", file=sys.stderr)
+
+# Configure Gemini API
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+if not GEMINI_API_KEY:
+    print("⚠️ Warning: GEMINI_API_KEY not found in environment variables or .env file", file=sys.stderr)
+    print("Please set your Gemini API key using one of these methods:", file=sys.stderr)
+    print("1. Create a .env file with: GEMINI_API_KEY=your-api-key-here", file=sys.stderr)
+    print("2. Set environment variable: $env:GEMINI_API_KEY='your-api-key-here'", file=sys.stderr)
+    sys.exit(1)
+else:
+    genai.configure(api_key=GEMINI_API_KEY)
+    
+    # Configure the model
+    generation_config = {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 40,
+        "max_output_tokens": 1024,
+    }
+
+    safety_settings = [
+        {
+            "category": "HARM_CATEGORY_HARASSMENT",
+            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+            "category": "HARM_CATEGORY_HATE_SPEECH",
+            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+            "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+        }
+    ]
 
 
 # --- Pydantic Models for Request/Response ---
@@ -32,13 +80,18 @@ class AnalysisResponse(BaseModel):
     result: str
     risk_score: float = None
     risk_level: str = None
+    suspicious_elements: dict = {
+        'urls': [],
+        'urgent_phrases': [],
+        'credential_phrases': []
+    }
 
 
 # --- Create FastAPI app ---
 app = FastAPI(
     title="Phishing Detector API",
     description="API for detecting phishing indicators in text content",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 # Add CORS middleware
@@ -57,6 +110,26 @@ app.add_middleware(
 
 
 # --- Core Phishing Detection Logic ---
+def levenshtein_distance(s1: str, s2: str) -> int:
+    """Calculate the Levenshtein distance between two strings."""
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+
+    if len(s2) == 0:
+        return len(s1)
+
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+
+    return previous_row[-1]
+
 def extract_features(text: str) -> Dict[str, bool]:
     """
     Extracts various features from the input text that can indicate phishing attempts.
@@ -73,8 +146,17 @@ def extract_features(text: str) -> Dict[str, bool]:
         'has_suspicious_links': False,
         'has_credential_request': False,
         'has_suspicious_sender': False,
-        'has_poor_formatting': False
+        'has_poor_formatting': False,
+        'has_typosquatting': False
     }
+    
+    # List of common legitimate domains to check against
+    legitimate_domains = [
+        'google.com', 'facebook.com', 'amazon.com', 'microsoft.com', 'apple.com',
+        'netflix.com', 'paypal.com', 'twitter.com', 'instagram.com', 'linkedin.com',
+        'youtube.com', 'gmail.com', 'yahoo.com', 'outlook.com', 'github.com',
+        'dropbox.com', 'spotify.com', 'twitch.tv', 'reddit.com', 'wikipedia.org'
+    ]
     
     # Convert text to lowercase for case-insensitive matching
     text_lower = text.lower()
@@ -87,7 +169,7 @@ def extract_features(text: str) -> Dict[str, bool]:
     ]
     features['has_urgency'] = any(word in text_lower for word in urgency_words)
 
-    # 2. Check for suspicious links (TLDs, IP addresses, uncommon ports)
+    # 2. Check for suspicious links (TLDs, IP addresses, uncommon ports, typosquatting)
     urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
     
     suspicious_tlds = ['.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.online', '.site', '.top', '.bid']
@@ -95,7 +177,26 @@ def extract_features(text: str) -> Dict[str, bool]:
     for url in urls:
         try:
             parsed = urlparse(url)
-            domain = parsed.netloc
+            domain = parsed.netloc.lower()
+            
+            # Remove port number if present
+            if ':' in domain:
+                domain = domain.split(':')[0]
+
+            # Check for typosquatting
+            for legitimate_domain in legitimate_domains:
+                # Strip 'www.' if present for comparison
+                clean_domain = domain.replace('www.', '')
+                clean_legitimate = legitimate_domain.replace('www.', '')
+                
+                # Calculate Levenshtein distance
+                distance = levenshtein_distance(clean_domain, clean_legitimate)
+                
+                # If domain is similar but not identical to a legitimate domain
+                if 0 < distance <= 2 and clean_domain != clean_legitimate:
+                    features['has_typosquatting'] = True
+                    features['has_suspicious_links'] = True
+                    break
 
             # Check if domain ends with a suspicious TLD
             if any(domain.endswith(tld) for tld in suspicious_tlds):
@@ -149,11 +250,12 @@ def extract_features(text: str) -> Dict[str, bool]:
 def calculate_risk_score(features: Dict[str, bool]) -> float:
     """Calculate weighted risk score based on detected features."""
     feature_weights = {
-        'has_urgency': 0.20,
-        'has_suspicious_links': 0.30,
-        'has_credential_request': 0.25,
+        'has_urgency': 0.15,
+        'has_suspicious_links': 0.25,
+        'has_credential_request': 0.20,
         'has_suspicious_sender': 0.15,
-        'has_poor_formatting': 0.10
+        'has_poor_formatting': 0.10,
+        'has_typosquatting': 0.15  # High weight for typosquatting as it's a strong phishing indicator
     }
     
     return sum(feature_weights[feature] for feature, present in features.items() if present)
@@ -168,6 +270,99 @@ def get_risk_level(risk_score: float) -> str:
     else:
         return "LOW RISK - This message shows few or no suspicious characteristics."
 
+
+# --- Gemini AI Analysis ---
+async def analyze_with_gemini(text: str) -> Dict[str, Any]:
+    """
+    Comprehensive AI-powered phishing email analysis using Gemini.
+    
+    Args:
+        text (str): The email text to analyze
+    
+    Returns:
+        Dict containing detailed AI analysis results
+    """
+    try:
+        model = genai.GenerativeModel('gemini-pro',
+                                    generation_config=generation_config,
+                                    safety_settings=safety_settings)
+        
+        prompt = f"""
+        You are an expert email security analyst. Perform a comprehensive analysis of this email/text for phishing attempts.
+        
+        Analyze the following aspects in detail:
+
+        1. URL Analysis:
+           - Identify any suspicious URLs
+           - Check for typosquatting (e.g., 'paypa1.com' instead of 'paypal.com')
+           - Look for IP addresses instead of domain names
+           - Detect unusual TLDs or suspicious domains
+
+        2. Social Engineering Tactics:
+           - Identify pressure tactics or urgency
+           - Look for emotional manipulation
+           - Check for authority impersonation
+           - Detect false promises or threats
+
+        3. Content Analysis:
+           - Analyze grammar and spelling quality
+           - Check for inconsistent formatting
+           - Identify generic greetings
+           - Look for excessive punctuation
+           - Detect copied logos or templates
+
+        4. Sensitive Information Requests:
+           - Identify requests for passwords
+           - Look for financial information requests
+           - Detect requests for personal data
+           - Check for unusual verification requests
+
+        5. Technical Indicators:
+           - Analyze email headers (if present)
+           - Check sender address authenticity
+           - Look for mismatched display names
+           - Identify suspicious attachments
+
+        6. Behavioral Manipulation:
+           - Detect urgency creation
+           - Identify threat tactics
+           - Look for unusual requests
+           - Check for out-of-character communication
+
+        Text to analyze:
+        {text}
+
+        Respond in this exact JSON format:
+        {{
+            "risk_level": "high/medium/low",
+            "confidence_score": 0.0-1.0,
+            "suspicious_elements": {{
+                "urls": ["list of suspicious URLs with explanation"],
+                "urgent_phrases": ["list of urgent/pressure phrases found"],
+                "credential_phrases": ["list of phrases requesting sensitive info"],
+                "impersonation_tactics": ["list of impersonation attempts found"],
+                "technical_issues": ["list of technical red flags"],
+                "manipulation_tactics": ["list of manipulation tactics used"]
+            }},
+            "security_recommendations": ["list of specific actions user should take"],
+            "detailed_analysis": "comprehensive explanation of all findings",
+            "safe_to_interact": false/true,
+            "primary_threat_indicators": ["list of most concerning elements"],
+            "suggested_actions": ["specific steps to take if user has already interacted"]
+        }}
+        """
+
+        response = await model.generate_content_async(prompt)
+        return eval(response.text)  # Convert string response to dict
+        
+    except Exception as e:
+        print(f"Gemini AI analysis failed: {str(e)}", file=sys.stderr)
+        return {
+            "risk_level": "unknown",
+            "confidence_score": 0.0,
+            "suspicious_elements": {"urls": [], "urgent_phrases": [], "credential_phrases": []},
+            "ai_explanation": f"AI analysis failed: {str(e)}"
+        }
 
 # --- API Endpoints ---
 
@@ -188,31 +383,91 @@ async def root():
 @app.post("/analyze_text", response_model=AnalysisResponse)
 async def analyze_text(request: TextAnalysisRequest):
     """
-    Analyzes text content for comprehensive phishing indicators.
+    Performs comprehensive AI-powered phishing analysis using Gemini.
     
-    Returns a detailed report with risk score and detected features.
+    Returns a detailed security analysis report.
     """
     try:
-        features = extract_features(request.text)
-        risk_score = calculate_risk_score(features)
-        risk_level = get_risk_level(risk_score)
+        # Get AI analysis
+        ai_analysis = await analyze_with_gemini(request.text)
         
-        report = ["📧 Phishing Analysis Report 📧\n"]
-        report.append(f"Overall Risk Score: {risk_score:.2f}/1.00")
-        report.append("\n--- Detected Features ---")
+        # Create comprehensive report
+        report = ["� Advanced Phishing Security Analysis �\n"]
         
-        for feature, present in features.items():
-            emoji = "🚨" if present else "✅"
-            feature_name = feature.replace('_', ' ').title()
-            report.append(f"{emoji} {feature_name}: {'Yes' if present else 'No'}")
+        # Risk Assessment
+        report.append(f"Risk Level: {ai_analysis['risk_level'].upper()}")
+        report.append(f"Confidence Score: {ai_analysis['confidence_score']:.2f}/1.00")
+        report.append(f"Safe to Interact: {'✅ Yes' if ai_analysis['safe_to_interact'] else '❌ No'}")
         
-        report.append(f"\n--- Risk Level ---")
-        report.append(f"⚠️ {risk_level}")
+        # Primary Threats
+        if ai_analysis['primary_threat_indicators']:
+            report.append("\n🚨 Primary Threat Indicators:")
+            for threat in ai_analysis['primary_threat_indicators']:
+                report.append(f"• {threat}")
+        
+        # Suspicious URLs
+        if ai_analysis['suspicious_elements']['urls']:
+            report.append("\n🔗 Suspicious URLs Detected:")
+            for url in ai_analysis['suspicious_elements']['urls']:
+                report.append(f"• {url}")
+        
+        # Social Engineering Tactics
+        if ai_analysis['suspicious_elements']['manipulation_tactics']:
+            report.append("\n🎭 Manipulation Tactics Identified:")
+            for tactic in ai_analysis['suspicious_elements']['manipulation_tactics']:
+                report.append(f"• {tactic}")
+        
+        # Technical Issues
+        if ai_analysis['suspicious_elements']['technical_issues']:
+            report.append("\n⚠️ Technical Red Flags:")
+            for issue in ai_analysis['suspicious_elements']['technical_issues']:
+                report.append(f"• {issue}")
+        
+        # Urgent/Pressure Phrases
+        if ai_analysis['suspicious_elements']['urgent_phrases']:
+            report.append("\n⚡ Pressure Tactics Found:")
+            for phrase in ai_analysis['suspicious_elements']['urgent_phrases']:
+                report.append(f"• {phrase}")
+        
+        # Credential/Sensitive Info Requests
+        if ai_analysis['suspicious_elements']['credential_phrases']:
+            report.append("\n🔑 Requests for Sensitive Information:")
+            for phrase in ai_analysis['suspicious_elements']['credential_phrases']:
+                report.append(f"• {phrase}")
+        
+        # Impersonation Attempts
+        if ai_analysis['suspicious_elements']['impersonation_tactics']:
+            report.append("\n👤 Impersonation Attempts:")
+            for tactic in ai_analysis['suspicious_elements']['impersonation_tactics']:
+                report.append(f"• {tactic}")
+        
+        # Detailed Analysis
+        report.append("\n📝 Detailed Analysis:")
+        report.append(ai_analysis['detailed_analysis'])
+        
+        # Security Recommendations
+        report.append("\n✅ Security Recommendations:")
+        for rec in ai_analysis['security_recommendations']:
+            report.append(f"• {rec}")
+        
+        # Action Steps if Already Interacted
+        if not ai_analysis['safe_to_interact']:
+            report.append("\n🚨 If You've Already Interacted:")
+            for action in ai_analysis['suggested_actions']:
+                report.append(f"• {action}")
+                
+        # Use the confidence score as the risk score
+        risk_score = ai_analysis['confidence_score']
         
         return AnalysisResponse(
             result="\n".join(report),
             risk_score=risk_score,
-            risk_level=risk_level
+            risk_level=ai_analysis['risk_level'],
+            suspicious_elements={
+                'urls': ai_analysis['suspicious_elements']['urls'],
+                'urgent_phrases': ai_analysis['suspicious_elements']['urgent_phrases'],
+                'credential_phrases': ai_analysis['suspicious_elements']['credential_phrases']
+            }
         )
         
     except Exception as e:
