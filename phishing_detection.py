@@ -78,12 +78,20 @@ class TextAnalysisRequest(BaseModel):
 
 class AnalysisResponse(BaseModel):
     result: str
-    risk_score: float = None
-    risk_level: str = None
+    risk_score: float = 0.0
+    risk_level: str = "low"
     suspicious_elements: dict = {
         'urls': [],
         'urgent_phrases': [],
         'credential_phrases': []
+    }
+    features: dict = {
+        'has_urgency': False,
+        'has_suspicious_links': False,
+        'has_credential_request': False,
+        'has_suspicious_sender': False,
+        'has_poor_formatting': False,
+        'has_typosquatting': False
     }
 
 
@@ -110,6 +118,15 @@ app.add_middleware(
 
 
 # --- Core Phishing Detection Logic ---
+
+# List of common legitimate domains to check against
+legitimate_domains = [
+    'google.com', 'facebook.com', 'amazon.com', 'microsoft.com', 'apple.com',
+    'netflix.com', 'paypal.com', 'twitter.com', 'instagram.com', 'linkedin.com',
+    'youtube.com', 'gmail.com', 'yahoo.com', 'outlook.com', 'github.com',
+    'dropbox.com', 'spotify.com', 'twitch.tv', 'reddit.com', 'wikipedia.org'
+]
+
 def levenshtein_distance(s1: str, s2: str) -> int:
     """Calculate the Levenshtein distance between two strings."""
     if len(s1) < len(s2):
@@ -283,9 +300,8 @@ async def analyze_with_gemini(text: str) -> Dict[str, Any]:
         Dict containing detailed AI analysis results
     """
     try:
-        model = genai.GenerativeModel('gemini-pro',
-                                    generation_config=generation_config,
-                                    safety_settings=safety_settings)
+        # Create the model with the correct name
+        model = genai.GenerativeModel('gemini-1.0-pro')
         
         prompt = f"""
         You are an expert email security analyst. Perform a comprehensive analysis of this email/text for phishing attempts.
@@ -353,16 +369,11 @@ async def analyze_with_gemini(text: str) -> Dict[str, Any]:
         """
 
         response = await model.generate_content_async(prompt)
-        return eval(response.text)  # Convert string response to dict
+        return response.text
         
     except Exception as e:
         print(f"Gemini AI analysis failed: {str(e)}", file=sys.stderr)
-        return {
-            "risk_level": "unknown",
-            "confidence_score": 0.0,
-            "suspicious_elements": {"urls": [], "urgent_phrases": [], "credential_phrases": []},
-            "ai_explanation": f"AI analysis failed: {str(e)}"
-        }
+        return None
 
 # --- API Endpoints ---
 
@@ -479,22 +490,152 @@ async def quick_check(request: TextAnalysisRequest):
     """
     Provides a quick assessment of phishing likelihood.
     
-    Returns a brief summary of the risk level.
+    Returns a brief summary of the risk level with both AI and rule-based analysis.
     """
     try:
+        # First do rule-based analysis which is more reliable
         features = extract_features(request.text)
         num_suspicious_features = sum(1 for present in features.values() if present)
+        rule_based_score = num_suspicious_features / len(features)
         
-        if num_suspicious_features >= 3:
+        # Try to get AI analysis, but don't let it block the response if it fails
+        try:
+            ai_analysis = await analyze_with_gemini(request.text)
+            ai_score = float(ai_analysis.get('confidence_score', 0))
+            has_ai_analysis = True
+        except Exception as ai_error:
+            print(f"AI analysis failed but continuing with rule-based analysis: {str(ai_error)}", file=sys.stderr)
+            ai_score = 0
+            ai_analysis = {
+                "risk_level": "unknown",
+                "confidence_score": 0.0,
+                "detailed_analysis": "AI analysis unavailable at the moment.",
+                "security_recommendations": [],
+                "suggested_actions": [],
+                "suspicious_elements": {
+                    "urls": [],
+                    "urgent_phrases": [],
+                    "credential_phrases": [],
+                    "impersonation_tactics": [],
+                    "technical_issues": [],
+                    "manipulation_tactics": []
+                }
+            }
+            has_ai_analysis = False
+        
+        # Use the higher score between AI and rule-based analysis
+        risk_score = max(rule_based_score, ai_score)  # Take the higher risk score
+        
+        if risk_score >= 0.7:
             result = "🚨 High likelihood of phishing! Exercise extreme caution and do not interact."
-        elif num_suspicious_features >= 1:
+            risk_level = "high"
+        elif risk_score >= 0.4:
             result = "⚠️ Some suspicious elements detected. Review carefully before proceeding."
+            risk_level = "medium"
         else:
             result = "✅ Low risk - few or no suspicious elements detected."
+            risk_level = "low"
+
+        # Create a detailed report
+        report_sections = []
+        
+        # 1. Main Risk Assessment
+        report_sections.append(result)
+        
+        # 2. Technical Analysis Section (Always show this first as it's more reliable)
+        report_sections.append("\n📋 Technical Analysis:")
+        technical_findings = []
+        if features['has_urgency']:
+            technical_findings.append("⚠️ Contains urgent or threatening language")
+        if features['has_suspicious_links']:
+            technical_findings.append("🔗 Contains suspicious links or domains")
+        if features['has_credential_request']:
+            technical_findings.append("🔑 Requests sensitive information")
+        if features['has_suspicious_sender']:
+            technical_findings.append("👤 Suspicious sender address")
+        if features['has_poor_formatting']:
+            technical_findings.append("📝 Poor formatting or unusual style")
+        if features['has_typosquatting']:
+            technical_findings.append("🎯 Contains lookalike domain names")
+        
+        if technical_findings:
+            report_sections.extend(technical_findings)
+        else:
+            report_sections.append("✅ No suspicious technical elements detected")
+        
+        # 3. AI Analysis Section (Only if available)
+        if has_ai_analysis:
+            report_sections.append("\n🤖 AI Analysis:")
+            report_sections.append(ai_analysis['detailed_analysis'])
+        report_sections.append("\n📋 Technical Findings:")
+        if features['has_urgency']:
+            report_sections.append("⚠️ Contains urgent or threatening language")
+        if features['has_suspicious_links']:
+            report_sections.append("🔗 Contains suspicious links or domains")
+        if features['has_credential_request']:
+            report_sections.append("🔑 Requests sensitive information")
+        if features['has_suspicious_sender']:
+            report_sections.append("👤 Suspicious sender address")
+        if features['has_poor_formatting']:
+            report_sections.append("📝 Poor formatting or unusual style")
+        if features['has_typosquatting']:
+            report_sections.append("🎯 Contains lookalike domain names")
             
-        return AnalysisResponse(result=result)
+        # 4. Security Recommendations
+        if has_ai_analysis and ai_analysis['security_recommendations']:
+            report_sections.append("\n✅ Recommendations:")
+            for rec in ai_analysis['security_recommendations']:
+                report_sections.append(f"• {rec}")
+        else:
+            # Add basic recommendations based on technical analysis
+            report_sections.append("\n✅ Basic Security Recommendations:")
+            if features['has_suspicious_links']:
+                report_sections.append("• Do not click on any links before verifying their authenticity")
+            if features['has_credential_request']:
+                report_sections.append("• Never provide sensitive information through email")
+            if features['has_urgency']:
+                report_sections.append("• Be cautious of messages creating artificial urgency")
+                
+        # 5. Action Steps if High Risk
+        if risk_level == "high":
+            report_sections.append("\n🚨 Recommended Actions:")
+            if has_ai_analysis and ai_analysis['suggested_actions']:
+                for action in ai_analysis['suggested_actions']:
+                    report_sections.append(f"• {action}")
+            else:
+                # Basic high-risk actions
+                report_sections.append("• Do not interact with the message")
+                report_sections.append("• Report this as phishing to your email provider")
+                report_sections.append("• If you've already clicked any links, change your passwords immediately")
+
+        result = "\n".join(section for section in report_sections if section)
+            
+        return AnalysisResponse(
+            result=result,
+            risk_score=risk_score,
+            risk_level=risk_level,
+            suspicious_elements={
+                'urls': features.get('suspicious_urls', []),
+                'urgent_phrases': ai_analysis['suspicious_elements']['urgent_phrases'] if has_ai_analysis else [],
+                'credential_phrases': ai_analysis['suspicious_elements']['credential_phrases'] if has_ai_analysis else []
+            },
+            features=features
+        )
+            
+        return AnalysisResponse(
+            result=result,
+            risk_score=risk_score,
+            risk_level=risk_level,
+            suspicious_elements={
+                'urls': [],
+                'urgent_phrases': [],
+                'credential_phrases': []
+            },
+            features=features
+        )
         
     except Exception as e:
+        print(f"Quick check error: {str(e)}", file=sys.stderr)
         raise HTTPException(status_code=500, detail=f"Quick check failed: {str(e)}")
 
 
@@ -506,34 +647,128 @@ async def analyze_links(request: TextAnalysisRequest):
     Returns a detailed report on each identified link.
     """
     try:
-        # Find all URLs in the text
-        urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', request.text)
+        # Get both AI analysis and basic link analysis
+        ai_analysis = await analyze_with_gemini(request.text)
         
-        if not urls:
-            return AnalysisResponse(result="No links found in the provided text.")
+        # Find all URLs in the text using a more comprehensive pattern
+        urls = re.findall(r'(?:https?:\/\/|www\.|bit\.ly\/|tiny\.cc\/|t\.co\/|goo\.gl\/|is\.gd\/|cli\.gs\/|ow\.ly\/|bit\.do\/|j\.mp\/|tmblr\.co\/|tiny\.ly\/|tinyurl\.com\/|tr\.im\/|is\.gd\/|cli\.gs\/|yfrog\.com\/|migre\.me\/|ff\.im\/|tiny\.cc\/|url4\.eu\/|twit\.ac\/|su\.pr\/|snipurl\.com\/|short\.to\/|budurl\.com\/|ping\.fm\/|post\.ly\/|just\.as\/|bkite\.com\/|snipr\.com\/|fic\.kr\/|loopt\.us\/|doiop\.com\/|short\.ie\/|kl\.am\/|wp\.me\/|rubyurl\.com\/|om\.ly\/|to\.ly\/|bit\.ly\/|ln\-s\.ru\/|tiny\.cc\/|url4\.eu\/|urls\.im\/|tweez\.me\/|v\.gd\/|tr\.im\/|link\.zip\.net\/)[a-zA-Z0-9\-\.]+(?:\/[a-zA-Z0-9\-\._\?\,\'\/\\\+&amp;%\$#\=~]*)?', request.text)
         
-        suspicious_domains = ['.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.online', '.site', '.top', '.bid']
+        if not urls and not ai_analysis['suspicious_elements']['urls']:
+            return AnalysisResponse(
+                result="No links found in the provided text.",
+                risk_score=0.0,
+                risk_level="low",
+                features=extract_features(request.text)  # Still analyze the text for other features
+            )
+        
+        # Combine URLs from both regex and AI analysis
+        all_urls = set(urls + ai_analysis['suspicious_elements']['urls'])
+        
+        suspicious_domains = [
+            '.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.online', '.site', '.top', '.bid',
+            '.download', '.club', '.work', '.racing', '.party', '.info', '.click', '.loan',
+            '.win', '.stream', '.gdn', '.mom', '.date', '.trade', '.country', '.group',
+            '.science', '.kim', '.country', '.download', '.xin', '.faith', '.jetzt'
+        ]
         report = ["🔗 Link Analysis Report 🔗\n"]
+        suspicious_urls = []
         
-        for url in urls:
+        # Add AI analysis section
+        report.append("\n🤖 AI Analysis:")
+        report.append(ai_analysis['detailed_analysis'])
+        
+        report.append("\n📋 Technical Analysis:")
+        for url in all_urls:
             try:
-                parsed = urlparse(url)
-                domain = parsed.netloc
+                parsed = urlparse(url if '://' in url else 'http://' + url)
+                domain = parsed.netloc.lower()
                 
-                is_suspicious_domain = any(domain.endswith(susp) or susp in domain for susp in suspicious_domains)
-                is_ip_address_domain = re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", domain)
-                has_uncommon_port = parsed.port is not None and parsed.port not in [80, 443]
-                
-                if is_suspicious_domain or is_ip_address_domain or has_uncommon_port:
+                # Remove port number if present
+                if ':' in domain:
+                    domain = domain.split(':')[0]
+
+                is_suspicious = False
+                reasons = []
+
+                # Check for suspicious TLDs
+                if any(domain.endswith(susp) for susp in suspicious_domains):
+                    reasons.append("suspicious domain extension")
+                    is_suspicious = True
+
+                # Check for IP address domains
+                if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", domain):
+                    reasons.append("IP address used instead of domain name")
+                    is_suspicious = True
+
+                # Check for uncommon ports
+                if parsed.port is not None and parsed.port not in [80, 443]:
+                    reasons.append(f"unusual port number ({parsed.port})")
+                    is_suspicious = True
+
+                # Check for typosquatting against legitimate domains
+                for legitimate_domain in legitimate_domains:
+                    clean_domain = domain.replace('www.', '')
+                    clean_legitimate = legitimate_domain.replace('www.', '')
+                    distance = levenshtein_distance(clean_domain, clean_legitimate)
+                    if 0 < distance <= 2 and clean_domain != clean_legitimate:
+                        reasons.append(f"possible typosquatting of {legitimate_domain}")
+                        is_suspicious = True
+                        break
+
+                # Check for URL shorteners
+                url_shorteners = ['bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'tiny.cc', 'ow.ly']
+                if any(shortener in domain for shortener in url_shorteners):
+                    reasons.append("URL shortener detected")
+                    is_suspicious = True
+
+                if is_suspicious:
                     report.append(f"🚨 Suspicious link: {url}")
+                    if reasons:
+                        report.append(f"   Reasons: {', '.join(reasons)}")
+                    suspicious_urls.append(url)
                 else:
                     report.append(f"✅ Safe-looking link: {url}")
             except Exception as e:
                 report.append(f"⚠️ Could not analyze link: {url} (Error: {e})")
+                suspicious_urls.append(url)
         
-        return AnalysisResponse(result="\n".join(report))
+        # Calculate risk score based on both AI analysis and our detection
+        ai_risk = float(ai_analysis['confidence_score'])
+        url_risk = len(suspicious_urls) / len(all_urls) if all_urls else 0
+        risk_score = max(ai_risk, url_risk)  # Take the higher risk score
+        
+        if risk_score >= 0.7:
+            risk_level = "high"
+        elif risk_score >= 0.4:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
+            
+        return AnalysisResponse(
+            result="\n".join(report),
+            risk_score=risk_score,
+            risk_level=risk_level,
+            suspicious_elements={
+                'urls': suspicious_urls,
+                'urgent_phrases': ai_analysis['suspicious_elements']['urgent_phrases'],
+                'credential_phrases': ai_analysis['suspicious_elements']['credential_phrases']
+            },
+            features=extract_features(request.text)  # Include all detected features
+        )
+            
+        return AnalysisResponse(
+            result="\n".join(report),
+            risk_score=risk_score,
+            risk_level=risk_level,
+            suspicious_elements={
+                'urls': suspicious_urls,
+                'urgent_phrases': [],
+                'credential_phrases': []
+            }
+        )
         
     except Exception as e:
+        print(f"Link analysis error: {str(e)}", file=sys.stderr)
         raise HTTPException(status_code=500, detail=f"Link analysis failed: {str(e)}")
 
 

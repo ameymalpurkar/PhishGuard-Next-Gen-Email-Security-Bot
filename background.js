@@ -1,7 +1,7 @@
 // background.js
 console.log("Phishing Detector background.js loaded.");
 
-const API_URL = "http://localhost:8000/analyze_text"; // Your Python API endpoint
+const API_URL = "http://localhost:8000/quick_check"; // Primary analysis endpoint
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "analyze_email") {
@@ -14,39 +14,79 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
 
-    fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        text: emailBody
-      })
-    })
-      .then(async response => {
-        let data;
+    // Analyze the email with retry capability
+    async function analyzeWithRetry(retryCount = 3, delay = 1000) {
+      for (let attempt = 1; attempt <= retryCount; attempt++) {
         try {
-          data = await response.json();
-        } catch (e) {
-          throw new Error(`Invalid JSON response from server. Status: ${response.status}`);
-        }
-        if (!response.ok) {
-          if (response.status === 404) {
-            throw new Error(`API endpoint not found. Make sure your Python server is running on ${API_URL} and the endpoint exists.`);
-          } else if (response.status === 500) {
-            throw new Error(`Server error (${response.status}): ${response.statusText}. Check your Python server logs.`);
+          console.log(`Attempt ${attempt} of ${retryCount}`);
+          
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+              text: emailBody
+            })
+          });
+
+          // Get raw text first for better error handling
+          const textData = await response.text();
+          console.log(`Response (Attempt ${attempt}):`, textData);
+          
+          let responseData;
+          try {
+            responseData = JSON.parse(textData);
+          } catch (parseError) {
+            if (attempt < retryCount) {
+              console.log(`JSON parse failed, retrying...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+            throw new Error(`Invalid JSON response: ${textData.substring(0, 100)}...`);
           }
-          throw new Error(`HTTP error! Status: ${response.status} - ${response.statusText}`);
+
+          if (!response.ok) {
+            if (response.status === 500 && attempt < retryCount) {
+              console.log(`Server error, retrying in ${delay}ms...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+            throw new Error(`HTTP ${response.status}: ${textData}`);
+          }
+
+          return {
+            report: responseData.result,
+            riskScore: responseData.risk_score,
+            riskLevel: responseData.risk_level,
+            suspiciousElements: responseData.suspicious_elements || {},
+            features: responseData.features || {
+              has_urgency: false,
+              has_suspicious_links: false,
+              has_credential_request: false,
+              has_suspicious_sender: false,
+              has_poor_formatting: false,
+              has_typosquatting: false
+            }
+          };
+        } catch (error) {
+          if (attempt === retryCount) throw error;
+          console.error(`Attempt ${attempt} failed:`, error);
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
-        if (data && data.result) {
-          sendResponse({ report: data.result });
-        } else {
-          sendResponse({ error: "Invalid response format from server." });
-        }
-      })
+      }
+    }
+
+    // Execute the analysis with retry
+    analyzeWithRetry()
+      .then(result => sendResponse(result))
       .catch(error => {
-        console.error("Error during fetch to Python backend:", error);
-        sendResponse({ error: `Could not connect to analysis server or server error: ${error.message}. Make sure your Python server is running.` });
+        console.error("Analysis failed:", error);
+        sendResponse({ 
+          error: `Analysis failed: ${error.message}. Please try again.`,
+          errorDetails: error.toString()
+        });
       });
 
     return true; // Indicate that sendResponse will be called asynchronously
