@@ -300,8 +300,11 @@ async def analyze_with_gemini(text: str) -> Dict[str, Any]:
         Dict containing detailed AI analysis results
     """
     try:
-        # Create the model with the correct name
-        model = genai.GenerativeModel('gemini-1.0-pro')
+        import json
+        # Create the model with correct version name
+        model = genai.GenerativeModel('gemini-2.5-flash',
+                                    generation_config=generation_config,
+                                    safety_settings=safety_settings)
         
         prompt = f"""
         You are an expert email security analyst. Perform a comprehensive analysis of this email/text for phishing attempts.
@@ -369,11 +372,51 @@ async def analyze_with_gemini(text: str) -> Dict[str, Any]:
         """
 
         response = await model.generate_content_async(prompt)
-        return response.text
+        try:
+            # Parse the response text as JSON
+            result = json.loads(response.text)
+            return result
+        except json.JSONDecodeError as je:
+            print(f"Failed to parse Gemini response as JSON: {str(je)}", file=sys.stderr)
+            # Return a default structure if JSON parsing fails
+            return {
+                "risk_level": "unknown",
+                "confidence_score": 0.0,
+                "suspicious_elements": {
+                    "urls": [],
+                    "urgent_phrases": [],
+                    "credential_phrases": [],
+                    "impersonation_tactics": [],
+                    "technical_issues": [],
+                    "manipulation_tactics": []
+                },
+                "security_recommendations": ["Unable to process AI analysis"],
+                "detailed_analysis": "AI analysis failed to process the response",
+                "safe_to_interact": False,
+                "primary_threat_indicators": [],
+                "suggested_actions": ["Please rely on the rule-based analysis"]
+            }
         
     except Exception as e:
         print(f"Gemini AI analysis failed: {str(e)}", file=sys.stderr)
-        return None
+        print("Full error details:", e, file=sys.stderr)
+        return {
+            "risk_level": "unknown",
+            "confidence_score": 0.0,
+            "suspicious_elements": {
+                "urls": [],
+                "urgent_phrases": [],
+                "credential_phrases": [],
+                "impersonation_tactics": [],
+                "technical_issues": [],
+                "manipulation_tactics": []
+            },
+            "security_recommendations": ["AI analysis unavailable"],
+            "detailed_analysis": f"AI analysis failed: {str(e)}",
+            "safe_to_interact": False,
+            "primary_threat_indicators": [],
+            "suggested_actions": ["Please rely on the rule-based analysis"]
+        }
 
 # --- API Endpoints ---
 
@@ -621,18 +664,6 @@ async def quick_check(request: TextAnalysisRequest):
             },
             features=features
         )
-            
-        return AnalysisResponse(
-            result=result,
-            risk_score=risk_score,
-            risk_level=risk_level,
-            suspicious_elements={
-                'urls': [],
-                'urgent_phrases': [],
-                'credential_phrases': []
-            },
-            features=features
-        )
         
     except Exception as e:
         print(f"Quick check error: {str(e)}", file=sys.stderr)
@@ -754,17 +785,6 @@ async def analyze_links(request: TextAnalysisRequest):
                 'credential_phrases': ai_analysis['suspicious_elements']['credential_phrases']
             },
             features=extract_features(request.text)  # Include all detected features
-        )
-            
-        return AnalysisResponse(
-            result="\n".join(report),
-            risk_score=risk_score,
-            risk_level=risk_level,
-            suspicious_elements={
-                'urls': suspicious_urls,
-                'urgent_phrases': [],
-                'credential_phrases': []
-            }
         )
         
     except Exception as e:
