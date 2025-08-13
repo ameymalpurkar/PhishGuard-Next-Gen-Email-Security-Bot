@@ -10,6 +10,34 @@ function extractAIAnalysis(responseData) {
     return responseData.detailed_analysis.trim();
   }
   
+  // Check features to see if AI analysis was performed
+  if (responseData.features && responseData.features.has_ai_analysis) {
+    const confidence = responseData.features.ai_confidence || 0;
+    const riskLevel = responseData.features.ai_risk_assessment || 'unknown';
+    
+    let analysis = `AI Risk Assessment: ${riskLevel.toUpperCase()} (${(confidence * 100).toFixed(1)}% confidence)\n\n`;
+    
+    // Add AI-detected elements
+    if (responseData.features.ai_detected_urls > 0) {
+      analysis += `🔗 AI detected ${responseData.features.ai_detected_urls} suspicious URL(s)\n`;
+    }
+    if (responseData.features.ai_detected_urgent_phrases > 0) {
+      analysis += `⚠️ AI detected ${responseData.features.ai_detected_urgent_phrases} urgent phrase(s)\n`;
+    }
+    if (responseData.features.ai_detected_credential_phrases > 0) {
+      analysis += `🔑 AI detected ${responseData.features.ai_detected_credential_phrases} credential request(s)\n`;
+    }
+    
+    // Extract AI analysis from result text
+    const resultText = responseData.result || '';
+    const aiMatch = resultText.match(/🤖 AI Analysis:\s*(.*?)(?=\n📋|$)/s);
+    if (aiMatch && aiMatch[1].trim()) {
+      analysis += `\n${aiMatch[1].trim()}`;
+    }
+    
+    return analysis;
+  }
+  
   // Check if the result text contains AI-specific analysis
   const resultText = responseData.result || '';
   const aiMatch = resultText.match(/🤖 AI Analysis:\s*(.*?)(?=\n📋|\n✅|\n🚨|$)/s);
@@ -29,64 +57,95 @@ function extractAIAnalysis(responseData) {
 function extractTechnicalAnalysis(responseData) {
   let analysis = '';
   
-  // Add feature detection results
-  if (responseData.features) {
-    const detectedFeatures = Object.entries(responseData.features)
-      .filter(([feature, detected]) => detected)
-      .map(([feature, _]) => feature.replace('has_', '').replace(/_/g, ' '));
+  // Check if AI analysis was performed
+  if (responseData.features && responseData.features.has_ai_analysis) {
+    analysis += '🤖 AI-Powered Technical Analysis:\n';
+    analysis += `• Confidence Score: ${(responseData.features.ai_confidence * 100).toFixed(1)}%\n`;
+    analysis += `• Risk Assessment: ${responseData.features.ai_risk_assessment.toUpperCase()}\n\n`;
     
-    if (detectedFeatures.length > 0) {
-      analysis += '🔍 Detected Features:\n';
-      detectedFeatures.forEach(feature => {
-        analysis += `• ${feature.charAt(0).toUpperCase() + feature.slice(1)}\n`;
+    // Add AI-detected features
+    const aiFeatures = [];
+    if (responseData.features.has_urgency) aiFeatures.push('Urgent/threatening language');
+    if (responseData.features.has_suspicious_links) aiFeatures.push('Suspicious URLs');
+    if (responseData.features.has_credential_request) aiFeatures.push('Credential requests');
+    
+    if (aiFeatures.length > 0) {
+      analysis += '🔍 AI-Detected Features:\n';
+      aiFeatures.forEach(feature => {
+        analysis += `• ${feature}\n`;
       });
       analysis += '\n';
-    } else {
-      analysis += '✅ No suspicious features detected\n\n';
     }
   }
   
-  // Add suspicious elements if available
+  // Add rule-based analysis
+  if (responseData.features) {
+    const ruleFeatures = [];
+    if (responseData.features.has_typosquatting) ruleFeatures.push('Domain typosquatting');
+    if (responseData.features.has_sender_spoofing) ruleFeatures.push('Sender spoofing');
+    if (responseData.features.has_homoglyph_chars) ruleFeatures.push('Homoglyph characters');
+    if (responseData.features.has_poor_formatting) ruleFeatures.push('Poor formatting');
+    if (responseData.features.has_suspicious_sender) ruleFeatures.push('Suspicious sender patterns');
+    
+    if (ruleFeatures.length > 0) {
+      analysis += '📋 Rule-Based Detection:\n';
+      ruleFeatures.forEach(feature => {
+        analysis += `• ${feature}\n`;
+      });
+      analysis += '\n';
+    }
+  }
+  
+  // Add suspicious elements if available from AI
   if (responseData.suspicious_elements) {
     const elements = responseData.suspicious_elements;
     
     if (elements.urls && elements.urls.length > 0) {
-      analysis += '🔗 Suspicious URLs:\n';
-      elements.urls.forEach(url => {
+      analysis += '🔗 Suspicious URLs (AI Detected):\n';
+      elements.urls.slice(0, 3).forEach(url => {
         analysis += `• ${url}\n`;
       });
+      if (elements.urls.length > 3) {
+        analysis += `• ... and ${elements.urls.length - 3} more\n`;
+      }
       analysis += '\n';
     }
     
     if (elements.urgent_phrases && elements.urgent_phrases.length > 0) {
-      analysis += '⚡ Urgent Language:\n';
-      elements.urgent_phrases.forEach(phrase => {
+      analysis += '⚡ Urgent Language (AI Detected):\n';
+      elements.urgent_phrases.slice(0, 3).forEach(phrase => {
         analysis += `• "${phrase}"\n`;
       });
+      if (elements.urgent_phrases.length > 3) {
+        analysis += `• ... and ${elements.urgent_phrases.length - 3} more\n`;
+      }
       analysis += '\n';
     }
     
     if (elements.credential_phrases && elements.credential_phrases.length > 0) {
-      analysis += '🔑 Credential Requests:\n';
-      elements.credential_phrases.forEach(phrase => {
+      analysis += '🔑 Credential Requests (AI Detected):\n';
+      elements.credential_phrases.slice(0, 3).forEach(phrase => {
         analysis += `• "${phrase}"\n`;
       });
+      if (elements.credential_phrases.length > 3) {
+        analysis += `• ... and ${elements.credential_phrases.length - 3} more\n`;
+      }
       analysis += '\n';
     }
     
-    if (elements.technical_issues && elements.technical_issues.length > 0) {
-      analysis += '⚠️ Technical Issues:\n';
-      elements.technical_issues.forEach(issue => {
-        analysis += `• ${issue}\n`;
+    if (elements.ai_flags && elements.ai_flags.length > 0) {
+      analysis += '⚠️ AI System Flags:\n';
+      elements.ai_flags.forEach(flag => {
+        analysis += `• ${flag}\n`;
       });
       analysis += '\n';
     }
   }
   
-  // Add risk assessment
+  // Add risk assessment summary
   const riskLevel = responseData.risk_level || 'unknown';
   const riskScore = responseData.risk_score || 0;
-  analysis += `📊 Risk Assessment:\n• Level: ${riskLevel.toUpperCase()}\n• Score: ${(riskScore * 100).toFixed(1)}%`;
+  analysis += `📊 Final Risk Assessment:\n• Level: ${riskLevel.toUpperCase()}\n• Score: ${(riskScore * 100).toFixed(1)}%`;
   
   return analysis.trim() || 'No technical analysis data available';
 }

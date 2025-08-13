@@ -451,15 +451,49 @@ async def analyze_text_endpoint(request: TextAnalysisRequest):
     """Performs comprehensive AI-powered phishing analysis using Gemini."""
     try:
         ai_analysis = await analyze_with_gemini(request.text)
+        rule_based_features = extract_features(request.text)  # Keep as backup
         
         # Fallback to rule-based analysis if AI fails unexpectedly
         if ai_analysis.get('risk_level') == 'unknown':
             logging.warning("AI analysis returned 'unknown' risk, falling back to quick_check.")
             return await quick_check_endpoint(request)
 
+        # Extract AI features from suspicious_elements
+        ai_elements = ai_analysis.get('suspicious_elements', {})
+        ai_features = {
+            'has_urgency': bool(ai_elements.get('urgent_phrases', [])),
+            'has_suspicious_links': bool(ai_elements.get('urls', [])),
+            'has_credential_request': bool(ai_elements.get('credential_phrases', [])),
+            'has_ai_analysis': True,  # Flag to indicate AI was used
+            'ai_confidence': ai_analysis.get('confidence_score', 0.0),
+            'ai_risk_assessment': ai_analysis.get('risk_level', 'unknown'),
+            'ai_detected_urls': len(ai_elements.get('urls', [])),
+            'ai_detected_urgent_phrases': len(ai_elements.get('urgent_phrases', [])),
+            'ai_detected_credential_phrases': len(ai_elements.get('credential_phrases', []))
+        }
+        
+        # Merge with rule-based features for comprehensive analysis
+        combined_features = {**rule_based_features, **ai_features}
+
         # Build a report from the AI analysis
         report = [f"🛡️ {ai_analysis.get('risk_level', 'unknown').upper()} RISK 🛡️\n"]
+        report.append("🤖 AI Analysis:")
         report.append(ai_analysis.get('detailed_analysis', 'No detailed analysis available.'))
+        
+        # Add technical findings from AI
+        report.append("\n📋 AI Technical Findings:")
+        if ai_elements.get('urls'):
+            report.append(f"• Suspicious URLs detected: {len(ai_elements['urls'])}")
+            for url in ai_elements['urls'][:3]:  # Show first 3 URLs
+                report.append(f"  - {url}")
+        if ai_elements.get('urgent_phrases'):
+            report.append(f"• Urgent language patterns: {len(ai_elements['urgent_phrases'])}")
+            for phrase in ai_elements['urgent_phrases'][:3]:  # Show first 3 phrases
+                report.append(f"  - \"{phrase}\"")
+        if ai_elements.get('credential_phrases'):
+            report.append(f"• Credential requests: {len(ai_elements['credential_phrases'])}")
+            for phrase in ai_elements['credential_phrases'][:3]:  # Show first 3 phrases
+                report.append(f"  - \"{phrase}\"")
         
         if ai_analysis.get('security_recommendations'):
             report.append("\n✅ Security Recommendations:")
@@ -471,7 +505,7 @@ async def analyze_text_endpoint(request: TextAnalysisRequest):
             risk_score=ai_analysis.get('confidence_score', 0.0),
             risk_level=ai_analysis.get('risk_level', 'low'),
             suspicious_elements=ai_analysis.get('suspicious_elements', {}),
-            features=extract_features(request.text) # Also include rule-based features
+            features=combined_features  # Now uses AI + rule-based features
         )
     except Exception as e:
         logging.error(f"Full analysis failed: {str(e)}", exc_info=True)
