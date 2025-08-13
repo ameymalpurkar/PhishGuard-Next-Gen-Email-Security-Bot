@@ -74,9 +74,6 @@ A Chrome extension that scans Gmail emails for phishing attempts using both rule
 - **content.js**: Content script for extracting email content from Gmail
 - **manifest.json**: Chrome extension configuration
 
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Acknowledgments
 
