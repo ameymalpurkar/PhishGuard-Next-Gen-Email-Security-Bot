@@ -1,9 +1,19 @@
-8/6/25
+8/8/25
 *working
 -rule based system working correcty
  
 *not working
 - the gemini API is not responding properly 
+
+*need improvements
+- the extension should be more responsive and accurate specifically for links
+
+11/8/25
+*working
+-rule based system working correcty
+ 
+*not working
+- the gemini API is not responding properly still
 
 *need improvements
 - the extension should be more responsive and accurate specifically for links

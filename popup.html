@@ -3,19 +3,105 @@
 <head>
   <title>Phishing Detector</title>
   <style>
-    body { width: 300px; padding: 10px; font-family: Arial, sans-serif; }
+    body { width: 350px; padding: 15px; font-family: Arial, sans-serif; }
     button { width: 100%; padding: 10px; margin-top: 10px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; }
     button:hover { background-color: #45a049; }
+    button:disabled { background-color: #cccccc; cursor: not-allowed; }
     #status { margin-top: 10px; font-size: 0.9em; color: #555; }
-    #result { margin-top: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;}
+    
+    .analysis-section { 
+      margin-top: 15px; 
+      border: 1px solid #ddd; 
+      border-radius: 5px; 
+      overflow: hidden;
+    }
+    
+    .section-header { 
+      background-color: #f0f0f0; 
+      padding: 8px 12px; 
+      font-weight: bold; 
+      border-bottom: 1px solid #ddd;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .section-header:hover { background-color: #e8e8e8; }
+    
+    .section-content { 
+      padding: 12px; 
+      background-color: #f9f9f9; 
+      white-space: pre-wrap; 
+      word-break: break-word; 
+      max-height: 200px; 
+      overflow-y: auto;
+      display: block;
+    }
+    
+    .section-content.collapsed { display: none; }
+    
+    .toggle-icon { 
+      font-size: 12px; 
+      transition: transform 0.2s;
+    }
+    
+    .toggle-icon.collapsed { transform: rotate(-90deg); }
+    
+    .ai-section { border-left: 4px solid #2196F3; }
+    .rule-section { border-left: 4px solid #FF9800; }
+    .summary-section { border-left: 4px solid #4CAF50; }
+    
+    .loading-spinner {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #3498db;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 5px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .error { color: #d32f2f; }
+    .success { color: #388e3c; }
   </style>
 </head>
 <body>
-  <h3>Gmail Phishing Detector</h3>
+  <h3>🛡️ Gmail Phishing Detector</h3>
   <p>Open an email in Gmail and click "Analyze Email" to check for phishing indicators.</p>
-  <button id="analyzeButton">Analyze Current Email</button>
+  <button id="analyzeButton">🔍 Analyze Current Email</button>
   <div id="status"></div>
-  <div id="result"></div>
+  
+  <div id="summarySection" class="analysis-section summary-section" style="display: none;">
+    <div class="section-header" onclick="toggleSection('summary')">
+      <span>📊 Analysis Summary</span>
+      <span class="toggle-icon" id="summaryToggle">▼</span>
+    </div>
+    <div class="section-content" id="summaryContent"></div>
+  </div>
+  
+  <div id="aiSection" class="analysis-section ai-section" style="display: none;">
+    <div class="section-header" onclick="toggleSection('ai')">
+      <span>🤖 AI Analysis</span>
+      <span class="toggle-icon" id="aiToggle">▼</span>
+    </div>
+    <div class="section-content" id="aiContent"></div>
+  </div>
+  
+  <div id="ruleSection" class="analysis-section rule-section" style="display: none;">
+    <div class="section-header" onclick="toggleSection('rule')">
+      <span>📋 Technical Analysis</span>
+      <span class="toggle-icon" id="ruleToggle">▼</span>
+    </div>
+    <div class="section-content" id="ruleContent"></div>
+  </div>
+  
   <script src="popup.js"></script>
 </body>
 </html>

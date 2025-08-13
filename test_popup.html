@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test Phishing Detector UI</title>
+  <style>
+    body { width: 400px; padding: 20px; font-family: Arial, sans-serif; margin: 0 auto; }
+    button { width: 100%; padding: 10px; margin-top: 10px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    button:hover { background-color: #45a049; }
+    button:disabled { background-color: #cccccc; cursor: not-allowed; }
+    #status { margin-top: 10px; font-size: 0.9em; color: #555; }
+    
+    .analysis-section { 
+      margin-top: 15px; 
+      border: 1px solid #ddd; 
+      border-radius: 5px; 
+      overflow: hidden;
+    }
+    
+    .section-header { 
+      background-color: #f0f0f0; 
+      padding: 8px 12px; 
+      font-weight: bold; 
+      border-bottom: 1px solid #ddd;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .section-header:hover { background-color: #e8e8e8; }
+    
+    .section-content { 
+      padding: 12px; 
+      background-color: #f9f9f9; 
+      white-space: pre-wrap; 
+      word-break: break-word; 
+      max-height: 200px; 
+      overflow-y: auto;
+      display: block;
+    }
+    
+    .section-content.collapsed { display: none; }
+    
+    .toggle-icon { 
+      font-size: 12px; 
+      transition: transform 0.2s;
+    }
+    
+    .toggle-icon.collapsed { transform: rotate(-90deg); }
+    
+    .ai-section { border-left: 4px solid #2196F3; }
+    .rule-section { border-left: 4px solid #FF9800; }
+    .summary-section { border-left: 4px solid #4CAF50; }
+    
+    .loading-spinner {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #3498db;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 5px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .error { color: #d32f2f; }
+    .success { color: #388e3c; }
+  </style>
+</head>
+<body>
+  <h3>🛡️ Phishing Detector UI Test</h3>
+  <p>This is a standalone test of the UI components.</p>
+  <button id="testButton">🔍 Test Analysis Display</button>
+  <div id="status"></div>
+  
+  <div id="summarySection" class="analysis-section summary-section" style="display: none;">
+    <div class="section-header" onclick="toggleSection('summary')">
+      <span>📊 Analysis Summary</span>
+      <span class="toggle-icon" id="summaryToggle">▼</span>
+    </div>
+    <div class="section-content" id="summaryContent"></div>
+  </div>
+  
+  <div id="aiSection" class="analysis-section ai-section" style="display: none;">
+    <div class="section-header" onclick="toggleSection('ai')">
+      <span>🤖 AI Analysis</span>
+      <span class="toggle-icon" id="aiToggle">▼</span>
+    </div>
+    <div class="section-content" id="aiContent"></div>
+  </div>
+  
+  <div id="ruleSection" class="analysis-section rule-section" style="display: none;">
+    <div class="section-header" onclick="toggleSection('rule')">
+      <span>📋 Technical Analysis</span>
+      <span class="toggle-icon" id="ruleToggle">▼</span>
+    </div>
+    <div class="section-content" id="ruleContent"></div>
+  </div>
+  
+  <script>
+    // Copy the toggle function from popup.js
+    function toggleSection(sectionName) {
+      const content = document.getElementById(`${sectionName}Content`);
+      const toggle = document.getElementById(`${sectionName}Toggle`);
+      
+      if (content.classList.contains('collapsed')) {
+        content.classList.remove('collapsed');
+        toggle.textContent = '▼';
+        toggle.classList.remove('collapsed');
+      } else {
+        content.classList.add('collapsed');
+        toggle.textContent = '▶';
+        toggle.classList.add('collapsed');
+      }
+    }
+    
+    // Test data that simulates the API response
+    const testData = {
+      success: true,
+      data: {
+        risk_level: "medium",
+        risk_score: 0.65,
+        result: "⚠️ Some suspicious elements detected. Review carefully.\n\n📋 Technical Findings:\n• Detected: Has Urgency\n• Detected: Has Credential Request\n• Detected: Has Suspicious Links",
+        suspicious_elements: {
+          urls: ["http://suspicious-site.tk/verify"],
+          urgent_phrases: ["Act now", "Immediate action required"],
+          credential_phrases: ["verify your password", "update payment info"]
+        },
+        features: {
+          has_urgency: true,
+          has_suspicious_links: true,
+          has_credential_request: true,
+          has_suspicious_sender: false,
+          has_poor_formatting: false,
+          has_typosquatting: false,
+          has_sender_spoofing: false,
+          has_homoglyph_chars: false
+        },
+        ai_analysis: "AI analysis indicates potential phishing attempt due to urgent language and suspicious link patterns. The email requests sensitive information which is a common phishing tactic.",
+        technical_analysis: "🔍 Detected Features:\n• Urgency\n• Suspicious links\n• Credential request\n\n🔗 Suspicious URLs:\n• http://suspicious-site.tk/verify\n\n⚡ Urgent Language:\n• \"Act now\"\n• \"Immediate action required\"\n\n🔑 Credential Requests:\n• \"verify your password\"\n• \"update payment info\"\n\n📊 Risk Assessment:\n• Level: MEDIUM\n• Score: 65.0%",
+        security_recommendations: [
+          "Do not click any links in this email",
+          "Verify the sender through alternative means",
+          "Do not provide any personal information",
+          "Report this email as suspicious"
+        ]
+      }
+    };
+    
+    // Copy the display functions from popup.js
+    function showSuccess(message) {
+      const statusDiv = document.getElementById('status');
+      statusDiv.innerHTML = `<span class="success">✅ ${message}</span>`;
+    }
+    
+    function displaySummarySection(data) {
+      const summaryContent = document.getElementById('summaryContent');
+      const riskLevel = data.risk_level || 'unknown';
+      const riskScore = data.risk_score || 0;
+      const riskEmoji = riskLevel === 'high' ? '🚨' : riskLevel === 'medium' ? '⚠️' : '✅';
+      
+      let mainMessage = 'Analysis completed';
+      if (data.result) {
+        const lines = data.result.split('\n');
+        mainMessage = lines[0].replace(/[🚨⚠️✅]/g, '').trim();
+      }
+      
+      summaryContent.innerHTML = `<div style="font-size: 1.1em; margin-bottom: 10px;">
+        ${riskEmoji} <strong>Risk Level:</strong> ${riskLevel.toUpperCase()}
+      </div>
+      <div style="margin-bottom: 10px;">
+        <strong>Confidence Score:</strong> ${(riskScore * 100).toFixed(1)}%
+      </div>
+      <div style="padding: 8px; background-color: ${riskLevel === 'high' ? '#ffebee' : riskLevel === 'medium' ? '#fff3e0' : '#e8f5e8'}; border-radius: 4px;">
+        <strong>Assessment:</strong><br>${mainMessage}
+      </div>`;
+    }
+
+    function displayAISection(data) {
+      const aiContent = document.getElementById('aiContent');
+      
+      if (data.ai_analysis && data.ai_analysis !== 'AI analysis not available - using rule-based detection only') {
+        aiContent.textContent = data.ai_analysis;
+      } else {
+        aiContent.innerHTML = `<div style="color: #666; font-style: italic;">
+          AI analysis is currently using rule-based detection only.<br>
+          <small>This provides reliable phishing detection based on known patterns and indicators.</small>
+        </div>`;
+      }
+      
+      if (data.security_recommendations && data.security_recommendations.length > 0) {
+        aiContent.innerHTML += `<br><br><strong>🛡️ Security Recommendations:</strong><br>`;
+        data.security_recommendations.forEach(rec => {
+          aiContent.innerHTML += `• ${rec}<br>`;
+        });
+      }
+    }
+
+    function displayTechnicalSection(data) {
+      const ruleContent = document.getElementById('ruleContent');
+      
+      if (data.technical_analysis) {
+        ruleContent.textContent = data.technical_analysis;
+      } else {
+        let analysis = '';
+        
+        if (data.features) {
+          const detectedFeatures = Object.entries(data.features)
+            .filter(([feature, detected]) => detected)
+            .map(([feature, _]) => feature.replace('has_', '').replace(/_/g, ' '));
+          
+          if (detectedFeatures.length > 0) {
+            analysis += '🔍 Detected Features:\n';
+            detectedFeatures.forEach(feature => {
+              analysis += `• ${feature.charAt(0).toUpperCase() + feature.slice(1)}\n`;
+            });
+          } else {
+            analysis += '✅ No suspicious features detected';
+          }
+        }
+        
+        ruleContent.textContent = analysis || 'Technical analysis completed';
+      }
+    }
+    
+    function displayAnalysis(analysisResult) {
+      let data;
+      if (analysisResult && analysisResult.data) {
+        data = analysisResult.data;
+      } else if (typeof analysisResult === 'object' && analysisResult.risk_level) {
+        data = analysisResult;
+      } else {
+        return;
+      }
+
+      document.getElementById('summarySection').style.display = 'block';
+      document.getElementById('aiSection').style.display = 'block';
+      document.getElementById('ruleSection').style.display = 'block';
+
+      displaySummarySection(data);
+      displayAISection(data);
+      displayTechnicalSection(data);
+    }
+    
+    // Test button functionality
+    document.getElementById('testButton').addEventListener('click', () => {
+      showSuccess('Test analysis loaded!');
+      displayAnalysis(testData);
+    });
+  </script>
+</body>
+</html>
