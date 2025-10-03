@@ -28,12 +28,21 @@ ec31475 Update version to 3.0 in manifest.json for v3 branch
 ```
 
 ## Next Steps (Manual Action Required)
-To push the v3 branch to the remote repository, run:
+To push the v3 branch to the remote repository, you have two options:
+
+### Option 1: Using the helper script (Recommended)
+```bash
+./push_v3_branch.sh
+```
+
+### Option 2: Manual git push
 ```bash
 git push -u origin v3
 ```
 
 Note: Due to authentication constraints, the v3 branch could not be automatically pushed to the remote repository. The branch exists locally and is ready to be pushed by a user with appropriate credentials.
+
+A helper script (`push_v3_branch.sh`) has been provided to simplify the push process and provide helpful feedback.
 
 ## Project Structure on V3 Branch
 The v3 branch contains the complete PhishGuard project:
