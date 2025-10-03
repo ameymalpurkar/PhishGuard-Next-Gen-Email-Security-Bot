@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gmail Phishing Detector",
-  "version": "2.0",
+  "version": "3.0",
   "description": "Scans Gmail content for potential phishing indicators using a Python backend.",
   "permissions": [
     "activeTab",
