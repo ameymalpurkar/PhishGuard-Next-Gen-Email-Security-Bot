@@ -1,9 +1,22 @@
 #!/bin/bash
 # Helper script to push the v3 branch to remote repository
 # This script should be run by someone with push credentials
+# WARNING: Pushing will make the v3 branch public on GitHub
 
 echo "🚀 V3 Branch Push Helper Script"
 echo "================================"
+echo ""
+echo "⚠️  WARNING: This will push the v3 branch to the public GitHub repository."
+echo "⚠️  The branch is currently private (local only)."
+echo ""
+echo "Do you want to continue and make the v3 branch public? (y/n)"
+read -r confirm_public
+
+if [[ ! "$confirm_public" =~ ^[Yy]$ ]]; then
+    echo "Aborting push operation. The v3 branch will remain private (local only)."
+    exit 0
+fi
+
 echo ""
 
 # Check if v3 branch exists locally
