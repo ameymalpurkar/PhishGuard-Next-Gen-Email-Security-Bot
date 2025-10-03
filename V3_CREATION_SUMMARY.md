@@ -71,10 +71,13 @@ v3 branch (3 commits ahead of base):
 - Documentation created
 - Helper tools provided
 
-### ⏳ Pending (Requires Manual Action)
-The v3 branch exists locally but needs to be pushed to the remote repository. Due to authentication constraints in the automated environment, this step requires manual intervention.
+### ✅ Branch Privacy
+The v3 branch exists **only locally** and has **NOT** been pushed to the remote repository. It is currently private and only accessible on your local machine.
 
-**To push the v3 branch:**
+### ⏳ Optional: Push to Remote
+If you want to make the v3 branch available on the remote repository, you can push it manually. However, if you prefer to keep the branch private (local only), simply do not push it.
+
+**To push the v3 branch (if desired):**
 ```bash
 # Option 1: Use the helper script
 ./push_v3_branch.sh
@@ -82,6 +85,8 @@ The v3 branch exists locally but needs to be pushed to the remote repository. Du
 # Option 2: Direct git push
 git push -u origin v3
 ```
+
+**Note:** Due to authentication constraints in the automated environment, pushing requires manual intervention. The branch will remain private (local only) unless you explicitly push it.
 
 ## Verification
 

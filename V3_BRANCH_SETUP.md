@@ -27,20 +27,25 @@ The v3 branch exists locally with the following commit:
 ec31475 Update version to 3.0 in manifest.json for v3 branch
 ```
 
-## Next Steps (Manual Action Required)
-To push the v3 branch to the remote repository, you have two options:
+## Next Steps (Optional)
 
-### Option 1: Using the helper script (Recommended)
+### Keeping the Branch Private
+**The v3 branch currently only exists locally and is NOT visible on GitHub.** If you want to keep it private, simply do not push it to the remote repository. The branch will remain on your local machine only.
+
+### Pushing to Remote (Optional)
+If you want to make the v3 branch available on the remote repository, you have two options:
+
+#### Option 1: Using the helper script (Recommended)
 ```bash
 ./push_v3_branch.sh
 ```
 
-### Option 2: Manual git push
+#### Option 2: Manual git push
 ```bash
 git push -u origin v3
 ```
 
-Note: Due to authentication constraints, the v3 branch could not be automatically pushed to the remote repository. The branch exists locally and is ready to be pushed by a user with appropriate credentials.
+Note: Due to authentication constraints, the v3 branch could not be automatically pushed to the remote repository. The branch exists locally and is ready to be pushed by a user with appropriate credentials if desired.
 
 A helper script (`push_v3_branch.sh`) has been provided to simplify the push process and provide helpful feedback.
 
